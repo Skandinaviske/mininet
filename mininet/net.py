@@ -102,12 +102,13 @@ from mininet.node import ( Node, Host, OVSKernelSwitch, DefaultController,
                            Controller )
 from mininet.nodelib import NAT
 from mininet.link import Link, Intf
-from mininet.util import quietRun, fixLimits, numCores, ensureRoot
-from mininet.util import macColonHex, ipStr, ipParse, netParse, ipAdd
+from mininet.util import ( quietRun, fixLimits, numCores, ensureRoot,
+                           macColonHex, ipStr, ipParse, netParse, ipAdd,
+                           waitListening )
 from mininet.term import cleanUpScreens, makeTerms
 
 # Mininet version: should be consistent with README and LICENSE
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 
 class Mininet( object ):
     "Network emulation with hosts spawned in network namespaces."
@@ -280,7 +281,7 @@ class Mininet( object ):
                 # Use first switch if not specified
                 connect = self.switches[ 0 ]
             # Connect the nat to the switch
-            self.addLink( nat, self.switches[ 0 ] )
+            self.addLink( nat, connect )
             # Set the default route on hosts
             natIP = nat.params[ 'ip' ].split('/')[ 0 ]
             for host in self.hosts:
@@ -356,6 +357,8 @@ class Mininet( object ):
             options.setdefault( 'port1', port1 )
         if port2 is not None:
             options.setdefault( 'port2', port2 )
+        if self.intf is not None:
+            options.setdefault( 'intf', self.intf )
         # Set default MAC - this should probably be in Link
         options.setdefault( 'addr1', self.randMac() )
         options.setdefault( 'addr2', self.randMac() )
@@ -401,7 +404,7 @@ class Mininet( object ):
             if not isinstance( classes, list ):
                 classes = [ classes ]
             for i, cls in enumerate( classes ):
-                # Allow Controller objects because nobody understands currying
+                # Allow Controller objects because nobody understands partial()
                 if isinstance( cls, Controller ):
                     self.addController( cls )
                 else:
@@ -414,7 +417,12 @@ class Mininet( object ):
 
         info( '\n*** Adding switches:\n' )
         for switchName in topo.switches():
-            self.addSwitch( switchName, **topo.nodeInfo( switchName) )
+            # A bit ugly: add batch parameter if appropriate
+            params = topo.nodeInfo( switchName)
+            cls = params.get( 'cls', self.switch )
+            if hasattr( cls, 'batchStartup' ):
+                params.setdefault( 'batch', True )
+            self.addSwitch( switchName, **params )
             info( switchName + ' ' )
 
         info( '\n*** Adding links:\n' )
@@ -481,6 +489,13 @@ class Mininet( object ):
         for switch in self.switches:
             info( switch.name + ' ')
             switch.start( self.controllers )
+        started = {}
+        for swclass, switches in groupby(
+                sorted( self.switches, key=type ), type ):
+            switches = tuple( switches )
+            if hasattr( swclass, 'batchStartup' ):
+                success = swclass.batchStartup( switches )
+                started.update( { s: s for s in success } )
         info( '\n' )
         if self.waitConn:
             self.waitConnected()
@@ -495,19 +510,24 @@ class Mininet( object ):
         if self.terms:
             info( '*** Stopping %i terms\n' % len( self.terms ) )
             self.stopXterms()
-        info( '*** Stopping %i switches\n' % len( self.switches ) )
-        for swclass, switches in groupby(
-                sorted( self.switches, key=type ), type ):
-            if hasattr( swclass, 'batchShutdown' ):
-                swclass.batchShutdown( switches )
-        for switch in self.switches:
-            info( switch.name + ' ' )
-            switch.stop()
-            switch.terminate()
-        info( '\n' )
         info( '*** Stopping %i links\n' % len( self.links ) )
         for link in self.links:
+            info( '.' )
             link.stop()
+        info( '\n' )
+        info( '*** Stopping %i switches\n' % len( self.switches ) )
+        stopped = {}
+        for swclass, switches in groupby(
+                sorted( self.switches, key=type ), type ):
+            switches = tuple( switches )
+            if hasattr( swclass, 'batchShutdown' ):
+                success = swclass.batchShutdown( switches )
+                stopped.update( { s: s for s in success } )
+        for switch in self.switches:
+            info( switch.name + ' ' )
+            if switch not in stopped:
+                switch.stop()
+            switch.terminate()
         info( '\n' )
         info( '*** Stopping %i hosts\n' % len( self.hosts ) )
         for host in self.hosts:
@@ -712,27 +732,25 @@ class Mininet( object ):
     # XXX This should be cleaned up
 
     def iperf( self, hosts=None, l4Type='TCP', udpBw='10M', fmt=None,
-               seconds=5):
+               seconds=5, port=5001):
         """Run iperf between two hosts.
            hosts: list of hosts; if None, uses first and last hosts
            l4Type: string, one of [ TCP, UDP ]
            udpBw: bandwidth target for UDP test
            fmt: iperf format argument if any
            seconds: iperf time to transmit
+           port: iperf port
            returns: two-element array of [ server, client ] speeds
            note: send() is buffered, so client rate can be much higher than
            the actual transmission rate; on an unloaded system, server
            rate should be much closer to the actual receive rate"""
-        if not quietRun( 'which telnet' ):
-            error( 'Cannot find telnet in $PATH - required for iperf test' )
-            return
         hosts = hosts or [ self.hosts[ 0 ], self.hosts[ -1 ] ]
         assert len( hosts ) == 2
         client, server = hosts
-        output( '*** Iperf: testing ' + l4Type + ' bandwidth between ' )
-        output( "%s and %s\n" % ( client.name, server.name ) )
+        output( '*** Iperf: testing', l4Type, 'bandwidth between',
+                client, 'and', server, '\n' )
         server.cmd( 'killall -9 iperf' )
-        iperfArgs = 'iperf '
+        iperfArgs = 'iperf -p %d ' % port
         bwArgs = ''
         if l4Type == 'UDP':
             iperfArgs += '-u '
@@ -741,18 +759,20 @@ class Mininet( object ):
             raise Exception( 'Unexpected l4 type: %s' % l4Type )
         if fmt:
             iperfArgs += '-f %s ' % fmt
-        server.sendCmd( iperfArgs + '-s', printPid=True )
-        servout = ''
-        while server.lastPid is None:
-            servout += server.monitor()
+        server.sendCmd( iperfArgs + '-s' )
         if l4Type == 'TCP':
-            while 'Connected' not in client.cmd(
-                    'sh -c "echo A | telnet -e A %s 5001"' % server.IP()):
-                info( 'Waiting for iperf to start up...' )
-                sleep(.5)
+            if not waitListening( client, server.IP(), port ):
+                raise Exception( 'Could not connect to iperf on port %d'
+                                 % port )
         cliout = client.cmd( iperfArgs + '-t %d -c ' % seconds +
                              server.IP() + ' ' + bwArgs )
         debug( 'Client output: %s\n' % cliout )
+        servout = ''
+        # We want the last *b/sec from the iperf server output
+        # for TCP, there are two fo them because of waitListening
+        count = 2 if l4Type == 'TCP' else 1
+        while len( re.findall( '/sec', servout ) ) < count:
+            servout += server.monitor( timeoutms=5000 )
         server.sendInt()
         servout += server.waitOutput()
         debug( 'Server output: %s\n' % servout )
