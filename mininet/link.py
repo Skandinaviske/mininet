@@ -50,6 +50,7 @@ class Intf( object ):
         # This saves an ifconfig command per node
         if self.name == 'lo':
             self.ip = '127.0.0.1'
+            self.prefixLen = 8
         # Add to node (and move ourselves if necessary )
         moveIntfFn = params.pop( 'moveIntfFn', None )
         if moveIntfFn:
@@ -303,7 +304,7 @@ class TCIntf( Intf ):
             netemargs = '%s%s%s%s' % (
                 'delay %s ' % delay if delay is not None else '',
                 '%s ' % jitter if jitter is not None else '',
-                'loss %d ' % loss if loss is not None else '',
+                'loss %.5f ' % loss if loss is not None else '',
                 'limit %d' % max_queue_size if max_queue_size is not None
                 else '' )
             if netemargs:
@@ -363,7 +364,7 @@ class TCIntf( Intf ):
         stuff = ( ( [ '%.2fMbit' % bw ] if bw is not None else [] ) +
                   ( [ '%s delay' % delay ] if delay is not None else [] ) +
                   ( [ '%s jitter' % jitter ] if jitter is not None else [] ) +
-                  ( ['%d%% loss' % loss ] if loss is not None else [] ) +
+                  ( ['%.5f%% loss' % loss ] if loss is not None else [] ) +
                   ( [ 'ECN' ] if enable_ecn else [ 'RED' ]
                     if enable_red else [] ) )
         info( '(' + ' '.join( stuff ) + ') ' )

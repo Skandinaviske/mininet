@@ -1030,7 +1030,7 @@ class OVSSwitch( Switch ):
                   inband=False, protocols=None,
                   reconnectms=1000, stp=False, batch=False, **params ):
         """name: name for switch
-           failMode: controller loss behavior (secure|open)
+           failMode: controller loss behavior (secure|standalone)
            datapath: userspace or kernel mode (kernel|user)
            inband: use in-band control (False)
            protocols: use specific OpenFlow version(s) (e.g. OpenFlow13)
@@ -1425,16 +1425,16 @@ class Controller( Node ):
 
 class OVSController( Controller ):
     "Open vSwitch controller"
-    def __init__( self, name, command='ovs-controller', **kwargs ):
-        if quietRun( 'which test-controller' ):
-            command = 'test-controller'
-        Controller.__init__( self, name, command=command, **kwargs )
+    def __init__( self, name, **kwargs ):
+        kwargs.setdefault( 'command', self.isAvailable() or
+                           'ovs-controller' )
+        Controller.__init__( self, name, **kwargs )
 
     @classmethod
     def isAvailable( cls ):
         return ( quietRun( 'which ovs-controller' ) or
                  quietRun( 'which test-controller' ) or
-                 quietRun( 'which ovs-testcontroller' ) )
+                 quietRun( 'which ovs-testcontroller' ) ).strip()
 
 class NOX( Controller ):
     "Controller to run a NOX application."
