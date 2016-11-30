@@ -741,8 +741,11 @@ class Mininet( object ):
                         opts = '-W %s' % timeout
                     if dest.intfs:
                         if ipv6:
-                            result = node.cmd( 'ping6 -c1 %s -I %s %s' %
-                                (opts, node.intfs.get(0), dest.params.get('v6Addr', [])[:-3]))
+                            result = "0 packets transmitted, 0 received"
+                            ip = dest.params.get('ipv6', None)
+                            if ip:
+                                ip, prefixLen = ip.split( '/' )
+                                result = node.cmd( 'ping6 -c1 %s -I %s %s' % (opts, node.intfs.get(0), ip))
                         else:
                             result = node.cmd( 'ping -c1 %s %s' %
                                                (opts, dest.IP()) )
