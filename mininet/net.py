@@ -319,6 +319,85 @@ class Mininet( object ):
                     host.setDefaultRoute( 'via %s' % natIP )
         return nat
 
+    def getNodeLinks( self, node ):
+        """Get all of the links attached to a node.
+           node: node name
+           returns: dictionary of interfaces to connected nodes"""
+        interfaces = []
+        nodeLinks = {}
+        for intf in node.intfList():
+            if intf.link:
+                intfs = [ intf.link.intf1, intf.link.intf2 ]
+                intfs.remove( intf )
+                interfaces += intfs
+                nodeLinks[ intfs[ 0 ] ] = intfs[ 0 ].node 
+        return nodeLinks
+
+    def delNode( self, node ):
+        """remove a node from a running network
+           returns True if successful"""
+        if node not in self.hosts + self.switches:
+            #NOTE: what if node is a controller?
+            error( '%s doesnt exist!\n' % node )
+            return 0
+        node.stop()
+        node.cleanup()
+        nodeLinks = self.getNodeLinks( node )
+        for intf, n in nodeLinks.items():
+            del n.intfs[ n.ports[ intf ] ]
+            del n.ports[ intf ]
+            self.links.remove( intf.link )
+            intf.link = None
+        if node in self.hosts:
+            self.hosts.remove( node )
+        elif node in self.switches:
+            self.switches.remove( node )
+            info( '\n' )
+        del self.nameToNode[ node.name ]
+        return 1
+
+    def delLink( self, node1, node2 ):
+        """delete a link from mininet while running
+           returns True if successful"""
+        for intf in node1.intfList():
+            if intf.link:
+                intf1 = intf
+                intfs = [ intf.link.intf1, intf.link.intf2 ]
+                intfs.remove( intf )
+                intf2 = intfs[0]
+                if intf2 in node2.intfList():
+                    #remove the link from the list of links, maybe should be in link.delete()?
+                    self.links.remove( intf.link )
+                    intf.link.delete() # this deletes the interfaces on both ends of the link
+                    intf.link = None
+                    intf2.link = None
+                    port1 = node1.ports[ intf1 ]
+                    port2 = node2.ports[ intf2 ]
+                    del node1.nameToIntf[ intf1.name ]
+                    del node2.nameToIntf[ intf2.name ]
+                    del node1.intfs[ port1 ]
+                    del node2.intfs[ port2 ]
+                    del node1.ports[ intf1 ]
+                    del node2.ports[ intf2 ]
+                    return True
+        debug( '*** warning: no link between %s and %s\n' %( node1, node2 ) )
+        return False
+
+    def update(self):
+        '''
+        updates the addresses and statuses of all interfaces in the network
+        '''
+        for h in self.hosts:
+            for i in h.intfs.values():
+                i.updateAddr()
+        for s in self.switches:
+            for i in s.intfs.values():
+                i.updateAddr()
+        return True
+
+
+
+
     # BL: We now have four ways to look up nodes
     # This may (should?) be cleaned up in the future.
     def getNodeByName( self, *args ):
@@ -645,7 +724,7 @@ class Mininet( object ):
         sent, received = int( m.group( 1 ) ), int( m.group( 2 ) )
         return sent, received
 
-    def ping( self, hosts=None, timeout=None ):
+    def ping( self, ipv6=False, hosts=None, timeout=None ):
         """Ping between all specified hosts.
            hosts: list of hosts
            timeout: time to wait for a response, as string
@@ -665,8 +744,15 @@ class Mininet( object ):
                     if timeout:
                         opts = '-W %s' % timeout
                     if dest.intfs:
-                        result = node.cmd( 'ping -c1 %s %s' %
-                                           (opts, dest.IP()) )
+                        if ipv6:
+                            result = "0 packets transmitted, 0 received"
+                            ip = dest.params.get('ipv6', None)
+                            if ip:
+                                ip, prefixLen = ip.split( '/' )
+                                result = node.cmd( 'ping6 -c1 %s -I %s %s' % (opts, node.intfs.get(0), ip))
+                        else:
+                            result = node.cmd( 'ping -c1 %s %s' %
+                                               (opts, dest.IP()) )
                         sent, received = self._parsePing( result )
                     else:
                         sent, received = 0, 0
@@ -757,6 +843,11 @@ class Mininet( object ):
         """Ping between all hosts.
            returns: ploss packet loss percentage"""
         return self.ping( timeout=timeout )
+
+    def pingAll6( self, timeout=None ):
+        """Ping between all IPv6 hosts.
+            returns: ploss packet loss percentage"""
+        return self.ping( ipv6=True, timeout=timeout )
 
     def pingPair( self ):
         """Ping between first two hosts, useful for testing.
