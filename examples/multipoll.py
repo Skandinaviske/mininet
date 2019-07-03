@@ -8,7 +8,8 @@ monitoring them
 
 from mininet.topo import SingleSwitchTopo
 from mininet.net import Mininet
-from mininet.log import setLogLevel
+from mininet.log import info, setLogLevel
+from mininet.util import decode
 
 from time import time
 from select import poll, POLLIN
@@ -19,7 +20,7 @@ def monitorFiles( outfiles, seconds, timeoutms ):
     "Monitor set of files and return [(host, line)...]"
     devnull = open( '/dev/null', 'w' )
     tails, fdToFile, fdToHost = {}, {}, {}
-    for h, outfile in outfiles.iteritems():
+    for h, outfile in outfiles.items():
         tail = Popen( [ 'tail', '-f', outfile ],
                       stdout=PIPE, stderr=devnull )
         fd = tail.stdout.fileno()
@@ -40,7 +41,7 @@ def monitorFiles( outfiles, seconds, timeoutms ):
                 host = fdToHost[ fd ]
                 # Wait for a line of output
                 line = f.readline().strip()
-                yield host, line
+                yield host, decode( line )
         else:
             # If we timed out, return nothing
             yield None, ''
@@ -55,7 +56,7 @@ def monitorTest( N=3, seconds=3 ):
     net = Mininet( topo )
     net.start()
     hosts = net.hosts
-    print( "Starting test..." )
+    info( "Starting test...\n" )
     server = hosts[ 0 ]
     outfiles, errfiles = {}, {}
     for h in hosts:
@@ -69,10 +70,10 @@ def monitorTest( N=3, seconds=3 ):
                    '>', outfiles[ h ],
                    '2>', errfiles[ h ],
                    '&' )
-    print( "Monitoring output for", seconds, "seconds" )
+    info( "Monitoring output for", seconds, "seconds\n" )
     for h, line in monitorFiles( outfiles, seconds, timeoutms=500 ):
         if h:
-            print( '%s: %s' % ( h.name, line ) )
+            info( '%s: %s\n' % ( h.name, line ) )
     for h in hosts:
         h.cmd('kill %ping')
     net.stop()

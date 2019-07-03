@@ -16,12 +16,13 @@ import time
 
 from mininet.log import info
 from mininet.term import cleanUpScreens
-
+from mininet.util import decode
 
 def sh( cmd ):
     "Print a command and send it to the shell"
     info( cmd + '\n' )
-    return Popen( [ '/bin/sh', '-c', cmd ], stdout=PIPE ).communicate()[ 0 ]
+    result = Popen( [ '/bin/sh', '-c', cmd ], stdout=PIPE ).communicate()[ 0 ]
+    return decode( result )
 
 def killprocs( pattern ):
     "Reliably terminate processes matching a pattern (including args)"
@@ -50,8 +51,9 @@ class Cleanup( object ):
 
         info( "*** Removing excess controllers/ofprotocols/ofdatapaths/"
               "pings/noxes\n" )
-        zombies = 'controller ofprotocol ofdatapath ping nox_core lt-nox_core '
-        zombies += 'ovs-openflowd ovs-controller udpbwtest mnexec ivs'
+        zombies = ( 'controller ofprotocol ofdatapath ping nox_core'
+                    'lt-nox_core ovs-openflowd ovs-controller'
+                    'ovs-testcontroller udpbwtest mnexec ivs ryu-manager' )
         # Note: real zombie processes can't actually be killed, since they
         # are already (un)dead. Then again,
         # you can't connect to them either, so they're mostly harmless.
@@ -75,7 +77,6 @@ class Cleanup( object ):
         for dp in dps:
             if dp:
                 sh( 'dpctl deldp ' + dp )
-
         info( "***  Removing OVS datapaths\n" )
         dps = sh("ovs-vsctl --timeout=1 list-br").strip().splitlines()
         if dps:

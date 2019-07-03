@@ -27,17 +27,22 @@ class ClusterCLI( CLI ):
     def do_plot( self, _line ):
         "Plot topology colored by node placement"
         # Import networkx if needed
-        global nx, plt
+        global nx, plt, graphviz_layout
         if not nx:
             try:
-                # pylint: disable=import-error
+                # pylint: disable=import-error,no-member
                 import networkx
                 nx = networkx  # satisfy pylint
                 from matplotlib import pyplot
-                plt = pyplot   # satisfiy pylint
+                plt = pyplot   # satisfy pylint
                 import pygraphviz
                 assert pygraphviz  # silence pyflakes
-                # pylint: enable=import-error
+                # Networkx moved this around
+                if hasattr( nx, 'graphviz_layout' ):
+                    graphviz_layout = nx.graphviz_layout
+                else:
+                    graphviz_layout = nx.drawing.nx_agraph.graphviz_layout
+                # pylint: enable=import-error,no-member
             except ImportError:
                 error( 'plot requires networkx, matplotlib and pygraphviz - '
                        'please install them and try again\n' )
@@ -45,7 +50,8 @@ class ClusterCLI( CLI ):
         # Make a networkx Graph
         g = nx.Graph()
         mn = self.mn
-        servers, hosts, switches = mn.servers, mn.hosts, mn.switches
+        servers = getattr( mn, 'servers', [ 'localhost' ] )
+        hosts, switches = mn.hosts, mn.switches
         nodes = hosts + switches
         g.add_nodes_from( nodes )
         links = [ ( link.intf1.node, link.intf2.node )
@@ -55,7 +61,7 @@ class ClusterCLI( CLI ):
         # shapes = hlen * [ 's' ] + slen * [ 'o' ]
         color = dict( zip( servers, self.colorsFor( servers ) ) )
         # Plot it!
-        pos = nx.graphviz_layout( g )
+        pos = graphviz_layout( g )
         opts = { 'ax': None, 'font_weight': 'bold',
                  'width': 2, 'edge_color': 'darkblue' }
         hcolors = [ color[ getattr( h, 'server', 'localhost' ) ]

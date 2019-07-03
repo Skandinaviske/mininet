@@ -29,6 +29,8 @@ from subprocess import call
 from cmd import Cmd
 from os import isatty
 from select import poll, POLLIN
+import select
+import errno
 import sys
 import time
 import os
@@ -399,15 +401,16 @@ class CLI( Cmd ):
 
     def default( self, line ):
         """Called on an input line when the command prefix is not recognized.
-        Overridden to run shell commands when a node is the first CLI argument.
-        Past the first CLI argument, node names are automatically replaced with
-        corresponding IP addrs."""
+           Overridden to run shell commands when a node is the first
+           CLI argument.  Past the first CLI argument, node names are
+           automatically replaced with corresponding IP addrs."""
 
         first, args, line = self.parseline( line )
 
         if first in self.mn:
             if not args:
-                error( "*** Enter a command for node: %s <cmd>" % first )
+                error( '*** Please enter a command for node: %s <cmd>\n'
+                       % first )
                 return
             node = self.mn[ first ]
             rest = args.split( ' ' )
@@ -458,6 +461,13 @@ class CLI( Cmd ):
                 # it's possible to interrupt ourselves after we've
                 # read data but before it has been printed.
                 node.sendInt()
+            except select.error as e:
+                # pylint: disable=unpacking-non-sequence
+                errno_, errmsg = e.args
+                # pylint: enable=unpacking-non-sequence
+                if errno_ != errno.EINTR:
+                    error( "select.error: %d, %s" % (errno_, errmsg) )
+                    node.sendInt()
 
     def precmd( self, line ):
         "allow for comments in the cli"
